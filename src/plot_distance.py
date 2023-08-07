@@ -22,16 +22,24 @@ def is_valid_triangle(a,b,c):
 
 
 
-def plot_Alireza(D_IN,ImageNet_ACC_OOD_on_ImageNetA,alphas):
-    plt.scatter(D_IN, ImageNet_ACC_OOD_on_ImageNetA,label='D_IN')
-    plt.plot(D_IN, ImageNet_ACC_OOD_on_ImageNetA,label='D_IN')
-    plt.xlabel('DOOD')
-    plt.ylabel('Accuracy on CIFAR10(OOD)')
-    plt.title('distance OOD and ACC on CIFAR10')
-    
-    if not os.path.exists('Linear'):
-        os.makedirs('Linear')
-    plt.savefig('Linear/DOOD-CIFAR10-ImageNet-IN.png', dpi=300, bbox_inches='tight')
+def plot_Alireza(D_IN,ImageNet_ACC_OOD_on_ImageNetA,alphas,args):
+    plt.scatter(alphas, ImageNet_ACC_OOD_on_ImageNetA,label='D_IN')
+    plt.plot(alphas, ImageNet_ACC_OOD_on_ImageNetA,label='D_IN')
+    plt.xlabel('alphas')
+    if args.OOD == "CIFAR10":
+        
+        plt.ylabel('Accuracy on CIFAR10(OOD)')
+        plt.title('alphas and ACC on CIFAR10')
+        if not os.path.exists('Linear'):
+            os.makedirs('Linear')
+        plt.savefig('Linear/alphas-CIFAR10-ImageNet-IN.png', dpi=300, bbox_inches='tight')
+        
+    if args.OOD == "ImageNet":        
+        plt.ylabel('Accuracy on ImageNet(OOD)')
+        plt.title('distance OOD and ACC on ImageNet')
+        if not os.path.exists('Linear'):
+            os.makedirs('Linear')
+        plt.savefig('Linear/DOOD-CIFAR10-ImageNet-OOD.png', dpi=300, bbox_inches='tight')
 
 def plot_Alireza_alpha_distance(alphas,D_IN):
     
@@ -246,7 +254,7 @@ def dot_product_cosine_projction(theta_zero,theta_alpha,theta_ImageNet): # theta
     v = {key: theta_zero[key] - 0  for key in theta_zero.keys()}
     norm_u = dict_norm_calculator(u)
     norm_v = dict_norm_calculator(v)
-    dot_product = 0.0
+    dot_product = 0.0 
     for key in u.keys():
         tensor_u = u[key]
         tensor_v = v[key]
@@ -287,17 +295,53 @@ def Model(args,dataset):
 
 
 
-def model_creator(args):
+def model_creator(args,alpha):
     
-    linear = LinearizedImageEncoder.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/ImageNetVal-epochs-10/linear_zeroshot.pt')
-    pretrained_checkpoint_ImageNet_zeroshot = ImageClassifier.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/ImageNetVal-epochs-10/linear_zeroshot.pt')
-    finetuned_checkpoint_ImageNet = ImageClassifier.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/ImageNetVal-epochs-10/linear_finetuned.pt')    
-    finetuned_checkpoint_CIFAR10 = ImageClassifier.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/CIFAR10Val-epochs-15/linear_finetuned.pt')
-    del pretrained_checkpoint_ImageNet_zeroshot['model_name']
-    del finetuned_checkpoint_ImageNet['model_name']
-    del finetuned_checkpoint_CIFAR10['model_name']
+    if args.OOD == "CIFAR10":
+        print("OOD IS CIFAR10")
+        pretrained_checkpoint_ImageNet = '/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/ImageNetVal-epochs-10/linear_zeroshot.pt'
+        finetuned_checkpoint_ImageNet = '/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/ImageNetVal-epochs-10/linear_finetuned.pt'
+        task_vector_zeroshot = LinearizedTaskVector(pretrained_checkpoint_ImageNet, finetuned_checkpoint_ImageNet)
+        zs_encoder_ImageNet = task_vector_zeroshot.apply_to(pretrained_checkpoint_ImageNet, scaling_coef=0.0)
+        ft_encoder_ImageNet = task_vector_zeroshot.apply_to(finetuned_checkpoint_ImageNet, scaling_coef=0.0)
+        linear_image_encoder_ImageNet_zeroshot = LinearizedImageEncoder(
+            init_encoder=zs_encoder_ImageNet, image_encoder=ft_encoder_ImageNet, args=args)
+        
     
-    return pretrained_checkpoint_ImageNet_zeroshot,finetuned_checkpoint_ImageNet,finetuned_checkpoint_CIFAR10,linear
+        task_vector = LinearizedTaskVector(pretrained_checkpoint_ImageNet, finetuned_checkpoint_ImageNet)
+        zs_encoder_ImageNet = task_vector.apply_to(pretrained_checkpoint_ImageNet, scaling_coef=0.0)
+        ft_encoder_ImageNet = task_vector.apply_to(finetuned_checkpoint_ImageNet, scaling_coef=alpha)
+        linear_image_encoder_ImageNet = LinearizedImageEncoder(
+            init_encoder=zs_encoder_ImageNet, image_encoder=ft_encoder_ImageNet, args=args)
+        
+        finetuned_checkpoint_CIFAR10 = '/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/CIFAR10Val-epochs-15/linear_finetuned.pt'
+        task_vector = LinearizedTaskVector(pretrained_checkpoint_ImageNet, finetuned_checkpoint_CIFAR10)
+        ft_encoder_CIFAR10 = task_vector.apply_to(finetuned_checkpoint_ImageNet, scaling_coef=1.0)
+        linear_image_encoder_CIFAR10 = LinearizedImageEncoder(
+            init_encoder=zs_encoder_ImageNet, image_encoder=ft_encoder_CIFAR10, args=args)
+        
+        
+
+        # pretrained_checkpoint_ImageNet_zeroshot = ImageClassifier.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/ImageNetVal-epochs-10/linear_zeroshot.pt')
+        # # print(pretrained_checkpoint_ImageNet_zeroshot)
+        # finetuned_checkpoint_ImageNet = ImageClassifier.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/ImageNetVal-epochs-10/linear_finetuned.pt')    
+        # finetuned_checkpoint_CIFAR10 = ImageClassifier.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/CIFAR10Val-epochs-15/linear_finetuned.pt')
+        # del pretrained_checkpoint_ImageNet_zeroshot['model_name']
+        # del finetuned_checkpoint_ImageNet['model_name']
+        # del finetuned_checkpoint_CIFAR10['model_name']
+        
+        return linear_image_encoder_ImageNet,linear_image_encoder_CIFAR10,linear_image_encoder_ImageNet_zeroshot
+    
+    # elif args.OOD == "ImageNet":
+    #     linear = LinearizedImageEncoder.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/CIFAR10Val-epochs-15/linear_zeroshot.pt')
+    #     pretrained_checkpoint_CIFAR10_zeroshot = ImageClassifier.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/CIFAR10Val-epochs-15/linear_zeroshot.pt')
+    #     finetuned_checkpoint_ImageNet = ImageClassifier.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/ImageNetVal-epochs-10/linear_finetuned.pt')    
+    #     finetuned_checkpoint_CIFAR10 = ImageClassifier.load('/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/CIFAR10Val-epochs-15/linear_finetuned.pt')
+    #     del pretrained_checkpoint_ImageNet_zeroshot['model_name']
+    #     del finetuned_checkpoint_ImageNet['model_name']
+    #     del finetuned_checkpoint_CIFAR10['model_name']
+    #     return pretrained_checkpoint_CIFAR10_zeroshot,finetuned_checkpoint_ImageNet,finetuned_checkpoint_CIFAR10,
+        
         
         
         
@@ -330,11 +374,8 @@ def theta_alpha_creator(alpha, theta_IN, theta_OOD, theta_zero): # alpha,θ_Imag
 
 def main(args):
     print('main function running!')
-    θ_zero,θ_ImageNet,θ_CIFAR10,linear = model_creator(args)
+    
     print("Loading checkpoint done!")
-    # make sure checkpoints are compatible
-    # assert set(θ_ImageNet.keys()) == set(θ_zero.keys())
-    # assert set(θ_CIFAR10_1.keys()) == set(θ_zero.keys())
     
     D_IN = []
     D_OOD = []
@@ -345,17 +386,30 @@ def main(args):
     X = []
     split = "test"
     alphas = [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]
-    # alphas = [0,0.1]
-    for alpha in alphas:
-        theta_alpha, alpha,d_in,d_ood,x,d_theta_alpha_theta_zero = theta_alpha_creator(alpha,θ_ImageNet,θ_CIFAR10,θ_zero) 
-        linear.load_state_dict(theta_alpha)
-        evaluate(linear, args)
-        D_IN.append(d_in)
-        D_OOD.append(d_ood)
-        X.append(x)
-        
-        
-    ImageNet_ACC_OOD_on_CIFAR10_Linear= ACC_JSON_reader_CIFAR10_IN('/home/aabdolla/wise-ft/results-ImageNet-IN-CIFAR10-OOD.jsonl')
+    # alphas = [0,0.1,0.2]
+    if args.OOD == "CIFAR10":
+        for alpha in alphas:
+            linear_image_encoder_ImageNet,linear_image_encoder_CIFAR10,linear_image_encoder_ImageNet_zeroshot = model_creator(args,alpha)
+            # d_ood = dict_distance(linear_image_encoder_ImageNet,linear_image_encoder_CIFAR10)
+            evaluate(linear_image_encoder_ImageNet, args)
+            # D_IN.append(d_in)
+            # D_OOD.append(d_ood)
+            # X.append(x)
+            
+            
+        ImageNet_ACC_OOD_on_CIFAR10_Linear= ACC_JSON_reader_CIFAR10_IN('/home/aabdolla/wise-ft/results-ImageNet-IN-CIFAR10-OOD-2.jsonl')
+    
+    # if args.OOD == "ImageNet":
+    #     for alpha in alphas:
+        #     theta_alpha, alpha,d_in,d_ood,x,d_theta_alpha_theta_zero = theta_alpha_creator(alpha,θ_ImageNet,θ_CIFAR10,θ_zero) 
+        #     # linear.load_state_dict(theta_alpha)
+        #     evaluate(linear, args)
+        #     D_IN.append(d_in)
+        #     D_OOD.append(d_ood)
+        #     X.append(x)
+            
+            
+        # ImageNet_ACC_OOD_on_CIFAR10_Linear= ACC_JSON_reader_CIFAR10_IN('/home/aabdolla/wise-ft/results-ImageNet-OOD-CIFAR10-IN.jsonl')
     # print(f'DOOD is :{D_OOD}')
     # print(f'length of DOOD is :{len(D_OOD)}')
     # print(f'length of ACC is :{len(ImageNet_ACC_OOD_on_ImageNetA)}')
@@ -365,7 +419,7 @@ def main(args):
     # # plot_Alireza_alpha_distance(alphas,ImageNet_ACC_OOD_on_ImageNetA)
     # # plot_Alireza(alphas,ImageNet_ACC_OOD_on_ImageNetA,alphas) # D_IN,D_OOD,alphas
     # # plot_Alireza_projection_distance(X,ImageNet_ACC_OOD_on_ImageNetA)    
-    plot_Alireza(D_OOD,ImageNet_ACC_OOD_on_CIFAR10_Linear,alphas) 
+    plot_Alireza(D_OOD,ImageNet_ACC_OOD_on_CIFAR10_Linear,alphas,args) 
     
     
     # D_OOD = [d.tolist() for d in D_OOD]
