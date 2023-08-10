@@ -4,7 +4,7 @@ import os
 import copy
 import os
 import time
-
+import torch.nn.functional as F
 import torch
 
 from src.args import parse_arguments
@@ -385,15 +385,15 @@ def model_creator(args):
         linear_image_encoder_ImageNet = LinearizedImageEncoder(
             init_encoder=zs_encoder_ImageNet, image_encoder=ft_encoder_ImageNet, args=args)
         
-        finetuned_checkpoint_CIFAR10 = '/home/aabdolla/tangent_task_arithmetic/train/tangent_task_arithmetic/checkpoints/ViT-B-32/CIFAR100Val/linear_finetuned.pt'
+        finetuned_checkpoint_CIFAR10 = '/home/aabdolla/tangent_task_arithmetic/checkpoints/ViT-B-32/CIFAR10Val-epochs-15/linear_finetuned.pt'
         task_vector = LinearizedTaskVector(pretrained_checkpoint_ImageNet, finetuned_checkpoint_CIFAR10)
         ft_encoder_CIFAR10 = task_vector.apply_to(pretrained_checkpoint_ImageNet, scaling_coef=1.0)
         linear_image_encoder_CIFAR10 = LinearizedImageEncoder(
             init_encoder=zs_encoder_ImageNet, image_encoder=ft_encoder_CIFAR10, args=args)
         
-        distance_zs_OOD = dict_distance_2(linear_image_encoder_ImageNet_zeroshot,linear_image_encoder_CIFAR10)
-        distance_IN_OOD = dict_distance_2(linear_image_encoder_ImageNet,linear_image_encoder_CIFAR10)
-        distance_zs_IN = dict_distance_2(linear_image_encoder_ImageNet_zeroshot,linear_image_encoder_ImageNet)
+        # distance_zs_OOD = dict_distance_2(linear_image_encoder_ImageNet_zeroshot,linear_image_encoder_CIFAR10)
+        # distance_IN_OOD = dict_distance_2(linear_image_encoder_ImageNet,linear_image_encoder_CIFAR10)
+        # distance_zs_IN = dict_distance_2(linear_image_encoder_ImageNet_zeroshot,linear_image_encoder_ImageNet)
         
         # print("*"*80)
         # print(f'distance_zs_OOD is :{distance_zs_OOD}')
@@ -482,24 +482,23 @@ def theta_alpha_creator(alpha, theta_IN, theta_OOD, theta_zero): # alpha,θ_Imag
 
 def gram_schmidt(gradients, u):
     for gradient in gradients:
-        projection = (torch.dot(u, gradient) / torch.dot(gradient, gradient)) * gradient
+        dot_product = torch.dot(u.flatten(), gradient.flatten())
+        norm_squared = torch.dot(gradient.flatten(), gradient.flatten())
+        projection = (dot_product / norm_squared) * gradient
         u -= projection
     return u
 
 def finetune(image_encoder,args):
 
     train_dataset = args.train_dataset
-    # ckpdir = os.path.join(args.save, train_dataset)
     classification_head = get_classification_head(args, train_dataset)
 
     model = ImageClassifier(image_encoder, classification_head)
 
-    model.freeze_head()
+    # model.freeze_head()
     model = model.cuda()
-
+    print(f'batch-size is :{args.batch_size}')
     preprocess_fn = model.train_preprocess
-    print_every = 100
-
     dataset = get_dataset(
         train_dataset,
         preprocess_fn,
@@ -509,121 +508,90 @@ def finetune(image_encoder,args):
     print(f'dataset is :{dataset}')
     data_loader = get_dataloader(dataset, is_train=True, args=args, image_encoder=None)
     num_batches = len(dataset.train_loader)
-
-    # Distribute the data and model across the GPUs.
-    # ddp_loader = distribute_loader(data_loader)
+    
+    
 
     if args.ls > 0:
         loss_fn = LabelSmoothing(args.ls)
     else:
         loss_fn = torch.nn.CrossEntropyLoss()
 
-    params = [p for p in model.parameters() if p.requires_grad]
+    params = [p for p in model.parameters()]
     optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=args.wd)
-
-    scheduler = cosine_lr(
-        optimizer,
-        args.lr,
-        args.warmup_length,
-        args.epochs * num_batches // args.num_grad_accumulation,
-    )
-    # for epoch in range(1):
-    model.train()
+    model.eval()
     counter = 0
+    Grad = []
     for i, batch in enumerate(data_loader):
-        if counter == 2:
-            break  # Terminate the loop after processing 2 batches
-        
-        start_time = time.time()
+        if counter == 1:
+            break  
 
         batch = maybe_dictionarize(batch)
         inputs = batch["images"].cuda()
         labels = batch["labels"].cuda()
-        data_time = time.time() - start_time
-
+        
         logits = model(inputs)
 
         loss = loss_fn(logits, labels)
 
-        loss.backward()
-
-        torch.nn.utils.clip_grad_norm_(params, 1.0)
-        optimizer.step()
         optimizer.zero_grad()
-
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(params, 1.0)
         gradients = []
         for param in model.parameters():
-            print("calculate gradients")
+            # print("calculate gradients")
             if param.grad is not None:
                 gradients.append(param.grad.view(-1))
+        # optimizer.step()
+        # print(f'gradients are in loop is :{gradients}')
+        Grad.append(gradients)
         
-        counter += 1  # Increment the counter
-        
-    return gradients
+        counter += 1  
+    return Grad
 
-    # cleanup_ddp()
 
 
 def main(args):
+    torch.cuda.empty_cache()
     linear_image_encoder_ImageNet,linear_image_encoder_CIFAR10,linear_image_encoder_ImageNet_zeroshot = model_creator(args)
     train_datasets = [
-        "CIFAR10",
-        # "CIFAR100",
-        # "ImageNet",
-        # "Cars",
-        # "DTD",
-        # "EuroSAT",
-        # "GTSRB",
-        # "MNIST",
-        # "RESISC45",
-        # "SUN397",
-        # "SVHN",
+        "CIFAR10",# "CIFAR100",# "ImageNet",
     ]
     epochs = {
         # "CIFAR10" : 15,
         "CIFAR10": 1,
         # "ImageNet":10,
-        # "Cars": 35,
-        # "DTD": 76,
-        # "EuroSAT": 12,
-        # "GTSRB": 11,
-        # "MNIST": 5,
-        # "RESISC45": 15,
-        # "SUN397": 14,
-        # "SVHN": 4,
     }
 
     for dataset in train_datasets:
         args = parse_arguments()
-
-        # HACK: Some command line arguments are overwritten by defaults here.
         args.lr = 1e-5
+        args.num_grad_accumulation = 1
         args.epochs = epochs[dataset]
         args.train_dataset = dataset + "Val"
-
-        # We use gradient accumulation to simulate larger batch sizes if the model does not fit in memory.
-        args.batch_size = 64 if args.model == "ViT-L-14" else 128
-        args.num_grad_accumulation = 2 if args.model == "ViT-L-14" else 1
-
-        if args.seed is not None:
-            args.save = f"checkpoints_{args.seed}/{args.model}"
-        else:
-            args.save = f"checkpoints/{args.model}"
         print("=" * 100)
         print(f"Finetuning {args.model} on {dataset}")
         print("=" * 100)
-        # torch.multiprocessing.spawn(finetune, args=(args,), nprocs=args.world_size)
         gradients = finetune(linear_image_encoder_CIFAR10, args)
+    
+    print(f'gradients is :{gradients}')
     # Convert gradients to a tensor and normalize
     gradients_tensor = torch.stack([torch.cat(grad) for grad in gradients])
     norms = torch.norm(gradients_tensor, dim=1)
     normalized_gradients = gradients_tensor / norms[:, None]
     
+    print("="*80)
+    print(f'normalized_gradients shape is :{normalized_gradients.shape}')
+    print("="*80)
+    gradient_dim = normalized_gradients.shape
+    random_vector = torch.randn(gradient_dim)
+    # Normalize the random vector
+    normalized_random_vector = F.normalize(random_vector, p=2, dim=0)
+    
     # Perform Gram-Schmidt orthogonalization
-    orthogonalized_u = gram_schmidt(normalized_gradients, linear_image_encoder_ImageNet_zeroshot)
+    orthogonalized_u = gram_schmidt(normalized_gradients, normalized_random_vector.cuda())
     
     # Verify orthogonality
-    dot_products = [torch.dot(orthogonalized_u, grad) for grad in normalized_gradients]
+    dot_products = [torch.dot(orthogonalized_u.flatten(), grad.flatten()) for grad in normalized_gradients]
     
     print("Dot products between orthogonalized u and gradients:")
     for i, dot_product in enumerate(dot_products):
